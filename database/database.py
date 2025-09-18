@@ -1,7 +1,7 @@
 import asyncio
 import logging
 
-from sqlalchemy import Select, asc, desc, text
+from sqlalchemy import Select, asc, desc, or_, text
 from sqlalchemy.exc import InterfaceError, OperationalError
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import (
     AsyncSession,
     async_sessionmaker,
 )
+from sqlalchemy.orm import MappedColumn
 from typing import AsyncGenerator
 
 from configs import config
@@ -34,22 +35,18 @@ async def get_db() -> AsyncGenerator[AsyncSession]:
 
 
 def process_select_query(
-    db_query: Select, query: Query, search_by_columns: list[str]
+    db_query: Select, query: Query, search_by_columns: list[MappedColumn]
 ) -> Select:
     order_dir_func = asc if query.order_dir == OrderDir.asc else desc
-
-    filter_query = ""
-    if query.search:
-        for i, column in enumerate(search_by_columns):
-            if i == 0:
-                filter_query += f"{column} LIKE {query.search}"
-            else:
-                filter_query += f" OR {column} LIKE {query.search}"
+    
+    search_conds = []
+    for column in search_by_columns:
+        search_conds.append(column.ilike(query.search))
     
     db_query = (
         db_query.offset((query.page - 1) * query.limit)
         .limit(query.limit)
-        .filter(text(filter_query))
+        .filter(or_(*search_conds))
     )
     
     if query.order_by:
