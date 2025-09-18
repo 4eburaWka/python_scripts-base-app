@@ -5,6 +5,7 @@ import logging
 from functools import wraps
 from types import NoneType
 from typing import Any, get_args
+from pydantic import ValidationError
 from redis.asyncio import Redis
 
 from configs import config
@@ -18,14 +19,16 @@ redis_db = Redis(
 )
 
 
-async def redis_set(key: str, val: any, ttl: int = None):
+async def redis_set(key: str, val: dict, ttl: int = None):
     json_to_set = json.dumps({"result": val})
     await redis_db.set(key, json_to_set, ex=(ttl * 60) if ttl else None)
 
 
-async def redis_get(key: str) -> Any | None:
+async def redis_get(key: str) -> dict | None:
     try:
         res = await redis_db.get(key)
+        if res is None:
+            return None
         val = json.loads(res)["result"]
     except Exception as e:
         logging.error(e)
@@ -45,11 +48,11 @@ async def redis_del(key: str):
     await redis_db.delete(key)
 
 
-SIMPLE_CLASSES = [bool, str, int, float, list, tuple, dict, set, datetime.datetime, datetime.date, NoneType]
+SIMPLE_CLASSES = [bool, str, int, float, list, tuple, set, datetime.datetime, datetime.date, NoneType]
 
 
 def redis_cache(ttl: int = None, key: str = None, args_offset: int = 0) -> any:
-    """Caching the result of a function execution in redis.
+    """Caching the sqlalchemy or pydantic result of a function execution in redis.
 
     :param ttl: time to live in minutes
     :param key: custom key (func.__name__ by default)
@@ -79,9 +82,11 @@ def redis_cache(ttl: int = None, key: str = None, args_offset: int = 0) -> any:
             if result is None:
                 return None
             elif isinstance(redis_to_set, list):
-                redis_to_set = list(map(lambda el: el.model_dump(), redis_to_set))
+                redis_to_set = list(map(lambda el: el.model_dump(mode="json"), redis_to_set))
             elif not any(isinstance(result, cls) for cls in SIMPLE_CLASSES):
-                redis_to_set = result.model_dump()
+                redis_to_set = result.model_dump(mode="json")
+            else:
+                redis_to_set = str(result)
 
             try:
                 await redis_set(
@@ -98,14 +103,17 @@ def redis_cache(ttl: int = None, key: str = None, args_offset: int = 0) -> any:
 
 
 def parse_json_to_model(model, json_dict):
-    row = model()
-    
-    for k, v in json_dict.items():
-        if isinstance(v, list):
-            setattr(row, k, [parse_json_to_model(getattr(model, k).property.mapper.class_, x) for x in v])
-        elif not any(isinstance(v, cls) for cls in SIMPLE_CLASSES):
-            setattr(row, k, parse_json_to_model(getattr(model, k).property.mapper.class_), v)
-        else:
-            setattr(row, k, v)
+    try:
+        row = model()
+    except ValidationError:
+        row = model(**json_dict)
+    else:
+        for k, v in json_dict.items():
+            if isinstance(v, list):
+                setattr(row, k, [parse_json_to_model(getattr(model, k).property.mapper.class_, x) for x in v])
+            elif not any(isinstance(v, cls) for cls in SIMPLE_CLASSES):
+                setattr(row, k, parse_json_to_model(getattr(model, k).property.mapper.class_, v))
+            else:
+                setattr(row, k, v)
     
     return row
