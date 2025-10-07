@@ -39,16 +39,16 @@ def process_select_query(
 ) -> Select:
     order_dir_func = asc if query.order_dir == OrderDir.asc else desc
     
-    search_conds = []
-    for column in search_by_columns:
-        search_conds.append(column.ilike(query.search))
-    
     db_query = (
         db_query.offset((query.page - 1) * query.limit)
         .limit(query.limit)
-        .filter(or_(*search_conds))
     )
-    
+    if query.search:
+        search_conds = []
+        for column in search_by_columns:
+            search_conds.append(column.ilike(f"{query.search}%"))
+        db_query = db_query.filter(or_(*search_conds))
+
     if query.order_by:
         db_query = db_query.order_by(order_dir_func(text(query.order_by)))
 
