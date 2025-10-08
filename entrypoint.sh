@@ -6,4 +6,4 @@ until alembic upgrade head; do
     sleep 2
 done
 
-exec uvicorn main:app --host 0.0.0.0 --port 8080
+exec python3 main.py

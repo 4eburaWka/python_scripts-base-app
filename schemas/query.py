@@ -1,8 +1,8 @@
-from enum import Enum
+from enum import StrEnum
 from pydantic import BaseModel, Field
 
 
-class OrderDir(str, Enum):
+class OrderDir(StrEnum):
     asc = "asc"
     desc = "desc"
 

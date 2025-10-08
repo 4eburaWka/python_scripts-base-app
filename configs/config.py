@@ -28,12 +28,14 @@ def parse_env(env: str):
 
 ENV = parse_env(getenv("ENV"))
 
+
 # DATABASE
 DB_NAME = getenv("DB_NAME")
 DB_USER = getenv("DB_USER")
 DB_PASSWORD = getenv("DB_PASSWORD")
 DB_HOST = getenv("DB_HOST")
 DB_PORT = getenv("DB_PORT")
+
 
 # REDIS
 REDIS_HOST = getenv("REDIS_HOST")

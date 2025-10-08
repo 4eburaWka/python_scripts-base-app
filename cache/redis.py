@@ -1,14 +1,12 @@
-import datetime
 import json
 import logging
 
 from functools import wraps
-from types import NoneType
-from typing import Any, get_args
-from pydantic import ValidationError
+from typing import get_args
 from redis.asyncio import Redis
 
 from configs import config
+from utils.json import deserialize, SIMPLE_CLASSES
 
 
 redis_db = Redis(
@@ -16,6 +14,7 @@ redis_db = Redis(
     port=config.REDIS_PORT,
     password=config.REDIS_PASSWORD,
     db=config.REDIS_DB,
+    socket_connect_timeout=2,
 )
 
 
@@ -48,9 +47,6 @@ async def redis_del(key: str):
     await redis_db.delete(key)
 
 
-SIMPLE_CLASSES = [bool, str, int, float, list, tuple, set, datetime.datetime, datetime.date, NoneType]
-
-
 def redis_cache(ttl: int = None, key: str = None, args_offset: int = 0) -> any:
     """Caching the sqlalchemy or pydantic result of a function execution in redis.
 
@@ -73,10 +69,10 @@ def redis_cache(ttl: int = None, key: str = None, args_offset: int = 0) -> any:
                 if val is not None:
                     if isinstance(val, list):
                         cls = get_args(model_class)[0]
-                        return [parse_json_to_model(cls, row) for row in val]
+                        return [deserialize(cls, row) for row in val]
                     if any(issubclass(model_class, cls) for cls in SIMPLE_CLASSES):
                         return val
-                    return parse_json_to_model(model_class, val)
+                    return deserialize(model_class, val)
 
             result = redis_to_set = await func(*args, **kwargs)
             if result is None:
@@ -100,20 +96,3 @@ def redis_cache(ttl: int = None, key: str = None, args_offset: int = 0) -> any:
         return wrapper
 
     return decorator
-
-
-def parse_json_to_model(model, json_dict):
-    try:
-        row = model()
-    except ValidationError:
-        row = model(**json_dict)
-    else:
-        for k, v in json_dict.items():
-            if isinstance(v, list):
-                setattr(row, k, [parse_json_to_model(getattr(model, k).property.mapper.class_, x) for x in v])
-            elif not any(isinstance(v, cls) for cls in SIMPLE_CLASSES):
-                setattr(row, k, parse_json_to_model(getattr(model, k).property.mapper.class_, v))
-            else:
-                setattr(row, k, v)
-    
-    return row

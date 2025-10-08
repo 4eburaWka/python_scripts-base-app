@@ -2,6 +2,7 @@ import asyncio
 import logging
 
 from sqlalchemy import Select, asc, desc, or_, text
+from sqlalchemy.dialects.postgresql import insert as _insert
 from sqlalchemy.exc import InterfaceError, OperationalError
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
@@ -10,7 +11,7 @@ from sqlalchemy.ext.asyncio import (
     async_sessionmaker,
 )
 from sqlalchemy.orm import MappedColumn
-from typing import AsyncGenerator
+from typing import AsyncGenerator, Type, TypeVar
 
 from configs import config
 from configs.constants import LOCAL_ENV
@@ -53,6 +54,44 @@ def process_select_query(
         db_query = db_query.order_by(order_dir_func(text(query.order_by)))
 
     return db_query
+
+
+PSQL_QUERY_ALLOWED_MAX_ARGS = 32767
+
+
+Model = TypeVar('T')
+async def pg_bulk_insert(
+    session: AsyncSession, 
+    table: Type[Model],
+    data: list[Model], 
+    statement_modifier: function = None,
+):
+
+    if statement_modifier is None:
+        statement_modifier = lambda q: q
+
+    complete_batches = []
+
+    current_batch = []
+    current_count = 0
+    for row in data:
+        params_count = len(row)
+        current_count += params_count
+        if current_count >= PSQL_QUERY_ALLOWED_MAX_ARGS:
+            complete_batches.append(current_batch)
+            current_batch = [row]
+            current_count = params_count
+        else:
+            current_batch.append(row)
+    if len(current_batch) > 0:
+        complete_batches.append(current_batch)
+
+    for batch in complete_batches:
+        statement = statement_modifier(
+            _insert(table)
+            .values(batch)
+        )
+        await session.execute(statement)
 
 
 def retry_on_failure(
